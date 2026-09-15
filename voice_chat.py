@@ -103,7 +103,9 @@ class VoiceLink:
         self.audio      = pyaudio.PyAudio()
         self.stream_in  = None
         self.stream_out = None
-        self.play_queue = queue.Queue(maxsize=80)
+        
+        # Çoklu kuyruk yapısına geçiş
+        self.play_queues = {}
 
         self.peer_volumes: dict[tuple, float] = {}
         self._vol_vars: dict[tuple, tk.IntVar] = {}
@@ -509,29 +511,60 @@ class VoiceLink:
                 try: s.stop_stream(); s.close()
                 except: pass
                 setattr(self, attr, None)
-        while not self.play_queue.empty():
-            try: self.play_queue.get_nowait()
-            except: break
+                
+        # Yeni temizleme mekanizması
+        for q in self.play_queues.values():
+            while not q.empty():
+                try: q.get_nowait()
+                except: break
+        self.play_queues.clear()
+        
         log.info("Ses akışları kapatıldı")
+
+    def _mix_audio(self, chunks):
+        if not chunks:
+            return b""
+        if len(chunks) == 1:
+            return chunks[0]
+        
+        result = _arr.array('h', chunks[0])
+        for chunk in chunks[1:]:
+            temp = _arr.array('h', chunk)
+            for i in range(len(result)):
+                val = result[i] + temp[i]
+                result[i] = max(-32768, min(32767, val))
+        return result.tobytes()
 
     def _playback(self):
         while self.running:
-            try:
-                data = self.play_queue.get(timeout=0.15)
+            chunks = []
+            for src in list(self.play_queues.keys()):
+                try:
+                    chunks.append(self.play_queues[src].get_nowait())
+                except queue.Empty:
+                    pass
+            
+            if chunks:
+                mixed = self._mix_audio(chunks)
                 if self.stream_out:
-                    try: self.stream_out.write(data)
+                    try: 
+                        self.stream_out.write(mixed)
                     except Exception as e:
                         log.error(f"Playback yazma hatası: {e}")
-            except queue.Empty:
-                continue
+            else:
+                time.sleep(0.01)
 
     def _enqueue(self, pcm: bytes, src_addr):
         vol = self.peer_volumes.get(src_addr, 1.0)
         scaled = scale_audio(pcm, vol)
+        
+        if src_addr not in self.play_queues:
+            self.play_queues[src_addr] = queue.Queue(maxsize=20)
+            
         try:
-            self.play_queue.put_nowait(scaled)
+            self.play_queues[src_addr].put_nowait(scaled)
         except queue.Full:
-            log.warning("Play queue dolu, paket atlandı")
+            pass
 
     def _host_recv(self):
         while self.is_hosting:
