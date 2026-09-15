@@ -1,0 +1,29 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Depencdencies
+        run: pip install pyaudio keyboard pyinstaller
+
+      - name: exe
+        run: pyinstaller --onefile --windowed --name VoiceLink --hidden-import pyaudio voice_chat.py
+
+      - name: Release 
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/VoiceLink.exe
+          generate_release_notes: true

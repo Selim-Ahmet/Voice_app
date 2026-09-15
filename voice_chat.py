@@ -26,10 +26,10 @@ RATE         = 44100
 SAMPLE_WIDTH = 2
 UDP_PORT     = 7654
 
-AUDIO_HDR = b'\x01'   # \x01 + 6-byte kaynak etiketi + PCM
-CTRL_HDR  = b'\x00'   # \x00 + JSON
+AUDIO_HDR = b'\x01'
+CTRL_HDR  = b'\x00'
 
-HOST_TAG  = b'\x00\x00\x00\x00\x00\x00'   # host'un kendi sesini temsil eder
+HOST_TAG  = b'\x00\x00\x00\x00\x00\x00'
 HOST_ADDR = ('0.0.0.0', 0)
 
 DEFAULT_HOTKEY = 'f12'
@@ -37,7 +37,6 @@ DEFAULT_HOTKEY = 'f12'
 # ─── Yardımcı fonksiyonlar ────────────────────────────────
 
 def scale_audio(data: bytes, volume: float) -> bytes:
-    """PCM int16 verisini volume faktörüyle çarpar (saf Python, audioop yok)."""
     if abs(volume - 1.0) < 0.005:
         return data
     samples = _arr.array('h', data)
@@ -80,29 +79,21 @@ class VoiceLink:
         self.mic_muted    = False
         self.mute_hotkey  = DEFAULT_HOTKEY
 
-        # Ağ
-        self.peers       = {}   # HOST tarafı: addr → nick
-        self.peer_names  = {}   # CLIENT tarafı: addr → nick
+        self.peers       = {}
+        self.peer_names  = {}
         self.server_sock = None
         self.client_sock = None
         self.server_addr = None
 
-        # Ses
         self.audio      = pyaudio.PyAudio()
         self.stream_in  = None
         self.stream_out = None
         self.play_queue = queue.Queue(maxsize=80)
 
-        # Kullanıcı başına ses seviyesi  addr → float
         self.peer_volumes: dict[tuple, float] = {}
-        # UI için IntVar saklama (0-200 = %0-200)
         self._vol_vars: dict[tuple, tk.IntVar] = {}
 
         self._build_login()
-
-    # ──────────────────────────────────────────────────────
-    #  Ekranlar
-    # ──────────────────────────────────────────────────────
 
     def _clear(self):
         for w in self.root.winfo_children():
@@ -119,7 +110,6 @@ class VoiceLink:
                  font=("Segoe UI", 24, "bold"), bg='#0d0d0d', fg='#ffffff').pack()
         tk.Label(frm, text="Radmin VPN  ·  Sesli İletişim",
                  font=("Segoe UI", 10), bg='#0d0d0d', fg='#555555').pack(pady=(2, 28))
-
         tk.Label(frm, text="Kullanıcı Adın",
                  font=("Segoe UI", 11), bg='#0d0d0d', fg='#aaaaaa').pack(anchor='w')
 
@@ -159,29 +149,23 @@ class VoiceLink:
         nick = self.nickname.get()
         self.root.title(f"VoiceLink  —  {nick}")
 
-        # ── Header ──
         hdr = tk.Frame(self.root, bg='#111111', height=52)
         hdr.pack(fill='x')
         hdr.pack_propagate(False)
-
         tk.Label(hdr, text="🎙  VoiceLink",
                  font=("Segoe UI", 13, "bold"), bg='#111111', fg='#7c3aed').pack(side='left', padx=14)
-
         tk.Button(hdr, text="⚙",
                   font=("Segoe UI", 13), bg='#111111', fg='#888888',
                   activebackground='#111111', activeforeground='#ffffff',
                   relief='flat', bd=0, padx=6, cursor='hand2',
                   command=self._open_settings).pack(side='right', padx=6)
-
         self.lbl_status = tk.Label(hdr, text="⬤  Çevrimdışı",
                                    font=("Segoe UI", 9), bg='#111111', fg='#444444')
         self.lbl_status.pack(side='right', padx=6)
 
-        # ── Body ──
         body = tk.Frame(self.root, bg='#0d0d0d')
         body.pack(fill='both', expand=True, padx=16, pady=12)
 
-        # Kullanıcı chip
         chip = tk.Frame(body, bg='#161616')
         chip.pack(fill='x', pady=(0, 8))
         tk.Label(chip, text=f"👤  {nick}",
@@ -192,7 +176,6 @@ class VoiceLink:
                  font=("Segoe UI", 9), bg='#161616', fg='#7c3aed',
                  padx=10).pack(side='right')
 
-        # ── Oda Aç ──
         self._sep(body, "ODA AÇ")
         rh = tk.Frame(body, bg='#0d0d0d')
         rh.pack(fill='x', pady=(0, 2))
@@ -206,7 +189,6 @@ class VoiceLink:
                                   cursor='hand2', command=self._toggle_host)
         self.btn_host.pack(side='right')
 
-        # ── Odaya Katıl ──
         self._sep(body, "ODAYA KATIL")
         rj = tk.Frame(body, bg='#0d0d0d')
         rj.pack(fill='x', pady=(0, 2))
@@ -227,14 +209,12 @@ class VoiceLink:
                                   cursor='hand2', command=self._toggle_join)
         self.btn_join.pack(side='right')
 
-        # ── Kullanıcı listesi ──
         self._sep(body, "BAĞLI KULLANICILAR")
         self.frm_users = tk.Frame(body, bg='#111111')
         self.frm_users.pack(fill='both', expand=True, pady=(0, 4))
         tk.Label(self.frm_users, text="Henüz kimse bağlı değil",
                  font=("Segoe UI", 10), bg='#111111', fg='#3a3a3a').pack(pady=14)
 
-        # ── Mikrofon çubuğu ──
         bar = tk.Frame(self.root, bg='#111111', height=62)
         bar.pack(fill='x', side='bottom')
         bar.pack_propagate(False)
@@ -254,10 +234,6 @@ class VoiceLink:
                  font=("Segoe UI", 8, "bold"),
                  bg='#0d0d0d', fg='#444444').pack(anchor='w', pady=(8, 2))
 
-    # ──────────────────────────────────────────────────────
-    #  Ayarlar penceresi
-    # ──────────────────────────────────────────────────────
-
     def _open_settings(self):
         win = tk.Toplevel(self.root)
         win.title("Ayarlar")
@@ -269,14 +245,11 @@ class VoiceLink:
         tk.Label(win, text="⚙  Ayarlar",
                  font=("Segoe UI", 13, "bold"), bg='#0d0d0d', fg='#ffffff').pack(pady=(16, 12))
 
-        # ── Hotkey ──
         hk_frame = tk.Frame(win, bg='#161616')
         hk_frame.pack(fill='x', padx=16, pady=4)
-
         tk.Label(hk_frame, text="Mikrofon Sessiz Tuşu",
                  font=("Segoe UI", 10), bg='#161616', fg='#aaaaaa',
                  padx=10, pady=8).pack(side='left')
-
         self._hk_var = tk.StringVar(value=self.mute_hotkey.upper())
         hk_lbl = tk.Label(hk_frame, textvariable=self._hk_var,
                            font=("Segoe UI", 10, "bold"),
@@ -285,7 +258,7 @@ class VoiceLink:
         hk_lbl.pack(side='right', padx=(0, 6))
 
         if _KB:
-            tk.Button(win, text="Tuş Değiştir  (basılacak tuşu bekliyor...)",
+            tk.Button(win, text="Tuş Değiştir",
                       font=("Segoe UI", 10),
                       bg='#1e3a5f', fg='white',
                       activebackground='#2a4f7e',
@@ -318,9 +291,7 @@ class VoiceLink:
                 self._hk_var.set(hk.upper())
                 label.config(fg='#7c3aed')
                 self._register_hotkey()
-                # Mikrofon butonu metnini güncelle
                 if hasattr(self, 'btn_mic'):
-                    state = self.btn_mic.cget('state')
                     muted = self.mic_muted
                     txt = (f"🔇  Mikrofon Kapalı  ({hk.upper()})" if muted
                            else f"🎙  Mikrofon Açık  ({hk.upper()})")
@@ -338,10 +309,6 @@ class VoiceLink:
             _kb.add_hotkey(self.mute_hotkey, self._toggle_mic)
         except Exception:
             pass
-
-    # ──────────────────────────────────────────────────────
-    #  Host
-    # ──────────────────────────────────────────────────────
 
     def _toggle_host(self):
         if self.is_hosting: self._stop_host()
@@ -385,10 +352,6 @@ class VoiceLink:
         self.btn_mic.config(state='disabled', bg='#16a34a')
         self._update_mic_text()
         self._refresh_users()
-
-    # ──────────────────────────────────────────────────────
-    #  Client
-    # ──────────────────────────────────────────────────────
 
     def _toggle_join(self):
         if self.is_connected: self._disconnect()
@@ -449,10 +412,6 @@ class VoiceLink:
         self._update_mic_text()
         self._refresh_users()
 
-    # ──────────────────────────────────────────────────────
-    #  Ses
-    # ──────────────────────────────────────────────────────
-
     def _open_audio(self):
         self.stream_in  = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                                           input=True, frames_per_buffer=CHUNK)
@@ -481,17 +440,12 @@ class VoiceLink:
                 continue
 
     def _enqueue(self, pcm: bytes, src_addr):
-        """Ses verisini ses seviyesi uygulanarak kuyruğa ekle."""
         vol = self.peer_volumes.get(src_addr, 1.0)
         scaled = scale_audio(pcm, vol)
         try:
             self.play_queue.put_nowait(scaled)
         except queue.Full:
             pass
-
-    # ──────────────────────────────────────────────────────
-    #  Host ağ döngüleri
-    # ──────────────────────────────────────────────────────
 
     def _host_recv(self):
         while self.is_hosting:
@@ -514,14 +468,12 @@ class VoiceLink:
                         if addr not in self.peer_volumes:
                             self.peer_volumes[addr] = 1.0
                         self.root.after(0, self._refresh_users)
-                        # ACK: kendi nick'ini ve mevcut peer listesini gönder
                         peer_list = [{'ip': a[0], 'port': a[1], 'nick': n}
                                      for a, n in self.peers.items() if a != addr]
                         self._send_ctrl(self.server_sock, addr,
                                         {'type': 'ack',
                                          'nick': self.nickname.get(),
                                          'peers': peer_list})
-                        # Diğer peerlara yeni katılımı bildir
                         for peer in list(self.peers.keys()):
                             if peer != addr:
                                 self._send_ctrl(self.server_sock, peer,
@@ -529,7 +481,7 @@ class VoiceLink:
                                                  'ip': addr[0], 'port': addr[1],
                                                  'nick': msg['nick']})
                     elif t == 'leave':
-                        nick = self.peers.pop(addr, '?')
+                        self.peers.pop(addr, None)
                         self.root.after(0, self._refresh_users)
                         for peer in list(self.peers.keys()):
                             self._send_ctrl(self.server_sock, peer,
@@ -540,9 +492,7 @@ class VoiceLink:
 
             elif data[:1] == AUDIO_HDR:
                 pcm = data[1:]
-                # Host yerel oynatma (volume uygula)
                 self._enqueue(pcm, addr)
-                # Diğer peerlara kaynak etiketiyle ilet
                 src_tag = addr_to_tag(addr)
                 fwd = AUDIO_HDR + src_tag + pcm
                 for peer in list(self.peers.keys()):
@@ -551,7 +501,6 @@ class VoiceLink:
                         except: pass
 
     def _host_send(self):
-        """Host'un kendi sesini (HOST_TAG etiketiyle) tüm peerlara gönderir."""
         while self.is_hosting:
             try:
                 if self.stream_in and self.peers and not self.mic_muted:
@@ -564,10 +513,6 @@ class VoiceLink:
                     time.sleep(0.015)
             except OSError:
                 break
-
-    # ──────────────────────────────────────────────────────
-    #  Client ağ döngüleri
-    # ──────────────────────────────────────────────────────
 
     def _client_recv(self):
         while self.is_connected:
@@ -586,11 +531,9 @@ class VoiceLink:
                     msg = json.loads(data[1:].decode())
                     t = msg.get('type')
                     if t == 'ack':
-                        # Host'u peer olarak ekle
                         self.peer_names[HOST_ADDR] = msg['nick']
                         if HOST_ADDR not in self.peer_volumes:
                             self.peer_volumes[HOST_ADDR] = 1.0
-                        # Mevcut diğer peerleri ekle
                         for p in msg.get('peers', []):
                             pa = (p['ip'], p['port'])
                             self.peer_names[pa] = p['nick']
@@ -611,8 +554,6 @@ class VoiceLink:
                     pass
 
             elif data[:1] == AUDIO_HDR:
-                # Yeni format: \x01 + 6-byte tag + PCM
-                # Eski format (etiket yok): \x01 + PCM
                 if len(data) > 7:
                     src_tag  = data[1:7]
                     pcm      = data[7:]
@@ -633,26 +574,16 @@ class VoiceLink:
             except OSError:
                 break
 
-    # ──────────────────────────────────────────────────────
-    #  UI yardımcıları
-    # ──────────────────────────────────────────────────────
-
     def _toggle_mic(self):
         self.mic_muted = not self.mic_muted
         if self.btn_mic.cget('state') == 'disabled':
             return
-        if self.mic_muted:
-            self.btn_mic.config(bg='#dc2626')
-        else:
-            self.btn_mic.config(bg='#16a34a')
+        self.btn_mic.config(bg='#dc2626' if self.mic_muted else '#16a34a')
         self._update_mic_text()
 
     def _update_mic_text(self):
         hk = f"  ({self.mute_hotkey.upper()})" if _KB else ""
-        if self.mic_muted:
-            txt = f"🔇  Mikrofon Kapalı{hk}"
-        else:
-            txt = f"🎙  Mikrofon Açık{hk}"
+        txt = f"🔇  Mikrofon Kapalı{hk}" if self.mic_muted else f"🎙  Mikrofon Açık{hk}"
         try:
             self.btn_mic.config(text=txt)
         except Exception:
@@ -676,8 +607,7 @@ class VoiceLink:
 
     def _get_vol_var(self, addr) -> tk.IntVar:
         if addr not in self._vol_vars:
-            var = tk.IntVar(value=int(self.peer_volumes.get(addr, 1.0) * 100))
-            self._vol_vars[addr] = var
+            self._vol_vars[addr] = tk.IntVar(value=int(self.peer_volumes.get(addr, 1.0) * 100))
         return self._vol_vars[addr]
 
     def _change_volume(self, addr, delta: int):
@@ -690,13 +620,7 @@ class VoiceLink:
         for w in self.frm_users.winfo_children():
             w.destroy()
 
-        # HOST: self.peers  |  CLIENT: self.peer_names
-        if self.is_hosting:
-            source = self.peers
-        elif self.is_connected:
-            source = self.peer_names
-        else:
-            source = {}
+        source = self.peers if self.is_hosting else (self.peer_names if self.is_connected else {})
 
         if not source:
             tk.Label(self.frm_users, text="Henüz kimse bağlı değil",
@@ -710,41 +634,24 @@ class VoiceLink:
 
             row = tk.Frame(self.frm_users, bg='#1a1a1a')
             row.pack(fill='x', padx=4, pady=2)
-
             tk.Label(row, text=f"🔊  {nick}",
                      font=("Segoe UI", 11), bg='#1a1a1a', fg='#4ade80',
                      padx=8, pady=5).pack(side='left')
 
-            # Sağ taraf: [−] [%val] [+]
             right = tk.Frame(row, bg='#1a1a1a')
             right.pack(side='right', padx=6)
-
-            _a = addr  # closure fix
-            tk.Button(right, text="−",
-                      font=("Segoe UI", 11, "bold"),
-                      bg='#2a2a2a', fg='#ffffff',
-                      activebackground='#3a3a3a',
-                      relief='flat', bd=0, width=2,
-                      cursor='hand2',
-                      command=lambda a=_a: self._change_volume(a, -10)
-                      ).pack(side='left')
-
-            lbl_vol = tk.Label(right, textvariable=var,
-                               font=("Segoe UI", 9, "bold"),
-                               bg='#1a1a1a', fg='#7c3aed', width=4)
-            lbl_vol.pack(side='left', padx=2)
-
-            tk.Label(right, text="%",
-                     font=("Segoe UI", 9), bg='#1a1a1a', fg='#555555').pack(side='left')
-
-            tk.Button(right, text="+",
-                      font=("Segoe UI", 11, "bold"),
-                      bg='#2a2a2a', fg='#ffffff',
-                      activebackground='#3a3a3a',
-                      relief='flat', bd=0, width=2,
-                      cursor='hand2',
-                      command=lambda a=_a: self._change_volume(a, 10)
-                      ).pack(side='left', padx=(0, 4))
+            tk.Button(right, text="−", font=("Segoe UI", 11, "bold"),
+                      bg='#2a2a2a', fg='#ffffff', activebackground='#3a3a3a',
+                      relief='flat', bd=0, width=2, cursor='hand2',
+                      command=lambda a=addr: self._change_volume(a, -10)).pack(side='left')
+            tk.Label(right, textvariable=var, font=("Segoe UI", 9, "bold"),
+                     bg='#1a1a1a', fg='#7c3aed', width=4).pack(side='left', padx=2)
+            tk.Label(right, text="%", font=("Segoe UI", 9),
+                     bg='#1a1a1a', fg='#555555').pack(side='left')
+            tk.Button(right, text="+", font=("Segoe UI", 11, "bold"),
+                      bg='#2a2a2a', fg='#ffffff', activebackground='#3a3a3a',
+                      relief='flat', bd=0, width=2, cursor='hand2',
+                      command=lambda a=addr: self._change_volume(a, 10)).pack(side='left', padx=(0, 4))
 
     def run(self):
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
