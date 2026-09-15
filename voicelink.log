@@ -1,0 +1,5 @@
+22:48:05 [INFO] VoiceLink başlatıldı
+22:48:08 [INFO] Giriş yapıldı: teknotrol
+22:48:08 [ERROR] Hotkey kayıt hatası: '_KeyboardListener' object has no attribute 'blocking_hotkeys'
+22:48:11 [INFO] Uygulama kapatıldı
+22:48:11 [INFO] Ses akışları kapatıldı

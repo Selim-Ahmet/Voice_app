@@ -405,15 +405,68 @@ class VoiceLink:
         self.running      = True
         self.peer_names   = {}
 
-        self._send_ctrl(self.client_sock, self.server_addr,
-                        {'type': 'join', 'nick': self.nickname.get()})
-        log.info(f"Bağlanma isteği gönderildi: {ip}:{UDP_PORT}")
+        # UDP bağlantı doğrulaması (ACK Bekleme Döngüsü)
+        ack_received = False
+        for attempt in range(3):
+            self._send_ctrl(self.client_sock, self.server_addr,
+                            {'type': 'join', 'nick': self.nickname.get()})
+            log.info(f"Bağlanma isteği gönderildi (Deneme {attempt+1}): {ip}:{UDP_PORT}")
+            
+            end_time = time.time() + 0.5
+            while time.time() < end_time:
+                try:
+                    self.client_sock.settimeout(max(0.01, end_time - time.time()))
+                    data, addr = self.client_sock.recvfrom(65535)
+                    if data and data[:1] == CTRL_HDR:
+                        msg = json.loads(data[1:].decode())
+                        if msg.get('type') == 'ack':
+                            ack_received = True
+                            log.info(f"ACK alındı, host nick={msg['nick']}")
+                            self.peer_names[HOST_ADDR] = msg['nick']
+                            self.peer_volumes[HOST_ADDR] = 1.0
+                            for p in msg.get('peers', []):
+                                pa = (p['ip'], p['port'])
+                                self.peer_names[pa] = p['nick']
+                                self.peer_volumes[pa] = 1.0
+                            break
+                except (socket.timeout, ValueError):
+                    pass
+                except OSError:
+                    break
+            
+            if ack_received:
+                break
+                
+        if not ack_received:
+            self.is_connected = False
+            self.running = False
+            self.client_sock.close()
+            self.client_sock = None
+            log.error("Sunucudan ACK alınamadı.")
+            messagebox.showerror("VoiceLink", "Sunucuya bağlanılamadı. Lütfen IP adresini kontrol edin veya tekrar deneyin.")
+            return
+            
+        self.client_sock.settimeout(0.5)
 
+        # Ses aygıtını hata yakalama mekanizması ile başlat
+        try:
+            self._open_audio()
+        except Exception as e:
+            log.error(f"Ses aygıtı başlatılamadı: {e}")
+            self.is_connected = False
+            self.running = False
+            if self.client_sock:
+                self.client_sock.close()
+                self.client_sock = None
+            messagebox.showerror("VoiceLink", "Ses aygıtı başlatılamadı. Lütfen birkaç saniye bekleyip tekrar deneyin.")
+            return
+
+        # Yalnızca tüm doğrulamalar geçerse arayüzü güncelle
         self.btn_join.config(text="Ayrıl", bg='#7f1d1d')
         self.lbl_status.config(text=f"⬤  Bağlandı  ·  {ip}", fg='#22c55e')
         self.btn_mic.config(state='normal')
+        self.root.after(0, self._refresh_users)
 
-        self._open_audio()
         threading.Thread(target=self._client_recv, daemon=True).start()
         threading.Thread(target=self._client_send, daemon=True).start()
         threading.Thread(target=self._playback,    daemon=True).start()
