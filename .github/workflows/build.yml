@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -16,13 +18,13 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Depencdencies
+      - name: Bağımlılıkları kur
         run: pip install pyaudio keyboard pyinstaller
 
-      - name: exe
+      - name: EXE oluştur
         run: pyinstaller --onefile --windowed --name VoiceLink --hidden-import pyaudio voice_chat.py
 
-      - name: Release 
+      - name: Release oluştur
         uses: softprops/action-gh-release@v2
         with:
           files: dist/VoiceLink.exe
