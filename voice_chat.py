@@ -15,6 +15,7 @@ import time
 import logging
 import os
 import sys
+from datetime import datetime
 
 try:
     import keyboard as _kb
@@ -22,7 +23,7 @@ try:
 except ImportError:
     _KB = False
 
-# ─── Logging ──────────────────────────────────────────────
+# ─── Logging (dosya) ──────────────────────────────────────
 _base = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else os.path.abspath(__file__))
 logging.basicConfig(
     filename=os.path.join(_base, 'voicelink.log'),
@@ -83,7 +84,7 @@ class VoiceLink:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("VoiceLink")
-        self.root.geometry("440x570")
+        self.root.geometry("440x680")
         self.root.configure(bg='#0d0d0d')
         self.root.resizable(False, False)
 
@@ -106,10 +107,41 @@ class VoiceLink:
         self.play_queue = queue.Queue(maxsize=80)
 
         self.peer_volumes: dict[tuple, float] = {}
-        self._vol_vars: dict[tuple, tk.IntVar] = {}
+        self._vol_vars:    dict[tuple, tk.IntVar] = {}
+
+        self.log_widget = None  # UI log Text widget
 
         log.info("VoiceLink başlatıldı")
         self._build_login()
+
+    # ──────────────────────────────────────────────────────
+    #  UI Log
+    # ──────────────────────────────────────────────────────
+
+    def _ui_log(self, msg: str, level: str = "INFO"):
+        ts = datetime.now().strftime("%H:%M:%S")
+        line = f"[{ts}] {msg}\n"
+
+        # Dosyaya yaz
+        if level == "ERROR":
+            log.error(msg)
+        elif level == "WARN":
+            log.warning(msg)
+        else:
+            log.info(msg)
+
+        # UI widget'a yaz (thread-safe)
+        if self.log_widget:
+            def _write():
+                self.log_widget.config(state='normal')
+                self.log_widget.insert('end', line)
+                self.log_widget.see('end')
+                self.log_widget.config(state='disabled')
+            self.root.after(0, _write)
+
+    # ──────────────────────────────────────────────────────
+    #  Ekranlar
+    # ──────────────────────────────────────────────────────
 
     def _clear(self):
         for w in self.root.winfo_children():
@@ -157,7 +189,6 @@ class VoiceLink:
         if len(nick) > 20:
             messagebox.showwarning("VoiceLink", "Kullanıcı adı en fazla 20 karakter.")
             return
-        log.info(f"Giriş yapıldı: {nick}")
         self._register_hotkey()
         self._build_main()
 
@@ -166,6 +197,7 @@ class VoiceLink:
         nick = self.nickname.get()
         self.root.title(f"VoiceLink  —  {nick}")
 
+        # ── Header ──
         hdr = tk.Frame(self.root, bg='#111111', height=52)
         hdr.pack(fill='x')
         hdr.pack_propagate(False)
@@ -180,9 +212,11 @@ class VoiceLink:
                                    font=("Segoe UI", 9), bg='#111111', fg='#444444')
         self.lbl_status.pack(side='right', padx=6)
 
+        # ── Body ──
         body = tk.Frame(self.root, bg='#0d0d0d')
-        body.pack(fill='both', expand=True, padx=16, pady=12)
+        body.pack(fill='both', expand=True, padx=16, pady=10)
 
+        # Kullanıcı chip
         chip = tk.Frame(body, bg='#161616')
         chip.pack(fill='x', pady=(0, 8))
         tk.Label(chip, text=f"👤  {nick}",
@@ -193,6 +227,7 @@ class VoiceLink:
                  font=("Segoe UI", 9), bg='#161616', fg='#7c3aed',
                  padx=10).pack(side='right')
 
+        # ── Oda Aç ──
         self._sep(body, "ODA AÇ")
         rh = tk.Frame(body, bg='#0d0d0d')
         rh.pack(fill='x', pady=(0, 2))
@@ -206,6 +241,7 @@ class VoiceLink:
                                   cursor='hand2', command=self._toggle_host)
         self.btn_host.pack(side='right')
 
+        # ── Odaya Katıl ──
         self._sep(body, "ODAYA KATIL")
         rj = tk.Frame(body, bg='#0d0d0d')
         rj.pack(fill='x', pady=(0, 2))
@@ -226,12 +262,51 @@ class VoiceLink:
                                   cursor='hand2', command=self._toggle_join)
         self.btn_join.pack(side='right')
 
+        # ── Bağlı kullanıcılar ──
         self._sep(body, "BAĞLI KULLANICILAR")
-        self.frm_users = tk.Frame(body, bg='#111111')
-        self.frm_users.pack(fill='both', expand=True, pady=(0, 4))
+        self.frm_users = tk.Frame(body, bg='#111111', height=80)
+        self.frm_users.pack(fill='x', pady=(0, 4))
+        self.frm_users.pack_propagate(False)
         tk.Label(self.frm_users, text="Henüz kimse bağlı değil",
                  font=("Segoe UI", 10), bg='#111111', fg='#3a3a3a').pack(pady=14)
 
+        # ── Bağlantı Logu ──
+        log_header = tk.Frame(body, bg='#0d0d0d')
+        log_header.pack(fill='x', pady=(8, 2))
+        tk.Label(log_header, text="BAĞLANTI LOGU",
+                 font=("Segoe UI", 8, "bold"), bg='#0d0d0d', fg='#444444').pack(side='left')
+        tk.Button(log_header, text="Temizle",
+                  font=("Segoe UI", 8), bg='#0d0d0d', fg='#555555',
+                  activebackground='#0d0d0d', activeforeground='#aaaaaa',
+                  relief='flat', bd=0, cursor='hand2',
+                  command=self._clear_log).pack(side='right')
+
+        log_frame = tk.Frame(body, bg='#0a0a0a')
+        log_frame.pack(fill='both', expand=True, pady=(0, 4))
+
+        scrollbar = tk.Scrollbar(log_frame)
+        scrollbar.pack(side='right', fill='y')
+
+        self.log_widget = tk.Text(
+            log_frame,
+            font=("Consolas", 9),
+            bg='#0a0a0a', fg='#6ee7b7',
+            insertbackground='#7c3aed',
+            relief='flat', bd=0,
+            wrap='word',
+            state='disabled',
+            cursor='arrow',
+            yscrollcommand=scrollbar.set,
+            selectbackground='#7c3aed',
+            selectforeground='#ffffff',
+        )
+        self.log_widget.pack(side='left', fill='both', expand=True, padx=(4, 0))
+        scrollbar.config(command=self.log_widget.yview)
+
+        self._ui_log(f"Giriş yapıldı: {nick}")
+        self._ui_log(f"Yerel IP: {lip}")
+
+        # ── Mikrofon çubuğu ──
         bar = tk.Frame(self.root, bg='#111111', height=62)
         bar.pack(fill='x', side='bottom')
         bar.pack_propagate(False)
@@ -249,7 +324,17 @@ class VoiceLink:
     def _sep(self, parent, text):
         tk.Label(parent, text=text,
                  font=("Segoe UI", 8, "bold"),
-                 bg='#0d0d0d', fg='#444444').pack(anchor='w', pady=(8, 2))
+                 bg='#0d0d0d', fg='#444444').pack(anchor='w', pady=(6, 2))
+
+    def _clear_log(self):
+        if self.log_widget:
+            self.log_widget.config(state='normal')
+            self.log_widget.delete('1.0', 'end')
+            self.log_widget.config(state='disabled')
+
+    # ──────────────────────────────────────────────────────
+    #  Ayarlar
+    # ──────────────────────────────────────────────────────
 
     def _open_settings(self):
         win = tk.Toplevel(self.root)
@@ -308,14 +393,14 @@ class VoiceLink:
                 self._hk_var.set(hk.upper())
                 label.config(fg='#7c3aed')
                 self._register_hotkey()
-                log.info(f"Hotkey değiştirildi: {hk}")
+                self._ui_log(f"Hotkey değiştirildi: {hk.upper()}")
                 if hasattr(self, 'btn_mic'):
                     muted = self.mic_muted
                     txt = (f"🔇  Mikrofon Kapalı  ({hk.upper()})" if muted
                            else f"🎙  Mikrofon Açık  ({hk.upper()})")
                     self.root.after(0, lambda: self.btn_mic.config(text=txt))
             except Exception as e:
-                log.error(f"Hotkey capture hatası: {e}")
+                self._ui_log(f"Hotkey capture hatası: {e}", "ERROR")
                 label.config(text=self.mute_hotkey.upper(), fg='#7c3aed')
 
         threading.Thread(target=do_capture, daemon=True).start()
@@ -326,9 +411,12 @@ class VoiceLink:
         try:
             _kb.unhook_all_hotkeys()
             _kb.add_hotkey(self.mute_hotkey, self._toggle_mic)
-            log.info(f"Hotkey kayıt edildi: {self.mute_hotkey}")
         except Exception as e:
-            log.error(f"Hotkey kayıt hatası: {e}")
+            self._ui_log(f"Hotkey kayıt hatası: {e}", "ERROR")
+
+    # ──────────────────────────────────────────────────────
+    #  Host
+    # ──────────────────────────────────────────────────────
 
     def _toggle_host(self):
         if self.is_hosting: self._stop_host()
@@ -341,15 +429,16 @@ class VoiceLink:
             sock.bind(('', UDP_PORT))
             sock.settimeout(0.5)
             self.server_sock = sock
-            log.info(f"Host başlatıldı, port {UDP_PORT}")
         except Exception as e:
-            log.error(f"Host soket açılamadı: {e}")
+            self._ui_log(f"Host soket açılamadı: {e}", "ERROR")
             messagebox.showerror("VoiceLink", f"Soket açılamadı:\n{e}")
             return
 
         self.is_hosting = True
         self.running    = True
         self.peers      = {}
+
+        self._ui_log(f"Oda açıldı — Port {UDP_PORT}")
 
         self.btn_host.config(text="Kapat", bg='#7f1d1d')
         self.lbl_status.config(text=f"⬤  Oda Açık  ·  Port {UDP_PORT}", fg='#22c55e')
@@ -361,7 +450,7 @@ class VoiceLink:
         threading.Thread(target=self._playback,  daemon=True).start()
 
     def _stop_host(self):
-        log.info("Host kapatıldı")
+        self._ui_log("Oda kapatıldı")
         self.is_hosting = False
         self.running    = False
         self._close_audio()
@@ -375,6 +464,10 @@ class VoiceLink:
         self.btn_mic.config(state='disabled', bg='#16a34a')
         self._update_mic_text()
         self._refresh_users()
+
+    # ──────────────────────────────────────────────────────
+    #  Client
+    # ──────────────────────────────────────────────────────
 
     def _toggle_join(self):
         if self.is_connected: self._disconnect()
@@ -397,7 +490,7 @@ class VoiceLink:
             self.client_sock = sock
             self.server_addr = (ip, UDP_PORT)
         except Exception as e:
-            log.error(f"Client soket açılamadı: {e}")
+            self._ui_log(f"Soket açılamadı: {e}", "ERROR")
             messagebox.showerror("VoiceLink", f"Soket açılamadı:\n{e}")
             return
 
@@ -405,6 +498,7 @@ class VoiceLink:
         self.running      = True
         self.peer_names   = {}
 
+<<<<<<< HEAD
         # UDP bağlantı doğrulaması (ACK Bekleme Döngüsü)
         ack_received = False
         for attempt in range(3):
@@ -447,6 +541,12 @@ class VoiceLink:
             return
             
         self.client_sock.settimeout(0.5)
+=======
+        self._ui_log(f"Bağlanılıyor: {ip}:{UDP_PORT} ...")
+        self._send_ctrl(self.client_sock, self.server_addr,
+                        {'type': 'join', 'nick': self.nickname.get()})
+        self._ui_log("JOIN paketi gönderildi, ACK bekleniyor...")
+>>>>>>> 79db413 (log olusturma)
 
         # Ses aygıtını hata yakalama mekanizması ile başlat
         try:
@@ -472,7 +572,7 @@ class VoiceLink:
         threading.Thread(target=self._playback,    daemon=True).start()
 
     def _disconnect(self):
-        log.info("Bağlantı kesildi")
+        self._ui_log("Bağlantı kesildi")
         self.is_connected = False
         self.running      = False
         if self.client_sock and self.server_addr:
@@ -491,15 +591,19 @@ class VoiceLink:
         self._update_mic_text()
         self._refresh_users()
 
+    # ──────────────────────────────────────────────────────
+    #  Ses
+    # ──────────────────────────────────────────────────────
+
     def _open_audio(self):
         try:
             self.stream_in  = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                                               input=True, frames_per_buffer=CHUNK)
             self.stream_out = self.audio.open(format=FORMAT, channels=CHANNELS, rate=RATE,
                                               output=True, frames_per_buffer=CHUNK)
-            log.info("Ses akışları açıldı")
+            self._ui_log("Ses akışları açıldı")
         except Exception as e:
-            log.error(f"Ses akışı açılamadı: {e}")
+            self._ui_log(f"Ses akışı açılamadı: {e}", "ERROR")
             raise
 
     def _close_audio(self):
@@ -512,7 +616,6 @@ class VoiceLink:
         while not self.play_queue.empty():
             try: self.play_queue.get_nowait()
             except: break
-        log.info("Ses akışları kapatıldı")
 
     def _playback(self):
         while self.running:
@@ -521,7 +624,7 @@ class VoiceLink:
                 if self.stream_out:
                     try: self.stream_out.write(data)
                     except Exception as e:
-                        log.error(f"Playback yazma hatası: {e}")
+                        self._ui_log(f"Playback hatası: {e}", "ERROR")
             except queue.Empty:
                 continue
 
@@ -531,7 +634,11 @@ class VoiceLink:
         try:
             self.play_queue.put_nowait(scaled)
         except queue.Full:
-            log.warning("Play queue dolu, paket atlandı")
+            pass
+
+    # ──────────────────────────────────────────────────────
+    #  Host ağ döngüleri
+    # ──────────────────────────────────────────────────────
 
     def _host_recv(self):
         while self.is_hosting:
@@ -540,7 +647,7 @@ class VoiceLink:
             except socket.timeout:
                 continue
             except OSError as e:
-                log.error(f"Host recv OSError: {e}")
+                self._ui_log(f"Host recv hatası: {e}", "ERROR")
                 break
 
             if not data:
@@ -551,7 +658,7 @@ class VoiceLink:
                     msg = json.loads(data[1:].decode())
                     t = msg.get('type')
                     if t == 'join':
-                        log.info(f"Yeni bağlantı: {addr}, nick={msg['nick']}")
+                        self._ui_log(f"Bağlandı: {msg['nick']} ({addr[0]})")
                         self.peers[addr] = msg['nick']
                         if addr not in self.peer_volumes:
                             self.peer_volumes[addr] = 1.0
@@ -562,6 +669,7 @@ class VoiceLink:
                                         {'type': 'ack',
                                          'nick': self.nickname.get(),
                                          'peers': peer_list})
+                        self._ui_log(f"ACK gönderildi -> {addr[0]}")
                         for peer in list(self.peers.keys()):
                             if peer != addr:
                                 self._send_ctrl(self.server_sock, peer,
@@ -569,15 +677,15 @@ class VoiceLink:
                                                  'ip': addr[0], 'port': addr[1],
                                                  'nick': msg['nick']})
                     elif t == 'leave':
-                        log.info(f"Ayrıldı: {addr}")
-                        self.peers.pop(addr, None)
+                        nick = self.peers.pop(addr, addr[0])
+                        self._ui_log(f"Ayrıldı: {nick} ({addr[0]})")
                         self.root.after(0, self._refresh_users)
                         for peer in list(self.peers.keys()):
                             self._send_ctrl(self.server_sock, peer,
                                             {'type': 'peer_leave',
                                              'ip': addr[0], 'port': addr[1]})
                 except Exception as e:
-                    log.error(f"Host ctrl parse hatası: {e}")
+                    self._ui_log(f"Host ctrl parse hatası: {e}", "ERROR")
 
             elif data[:1] == AUDIO_HDR:
                 pcm = data[1:]
@@ -588,7 +696,7 @@ class VoiceLink:
                     if peer != addr:
                         try: self.server_sock.sendto(fwd, peer)
                         except Exception as e:
-                            log.error(f"Host forward hatası -> {peer}: {e}")
+                            self._ui_log(f"Forward hatası -> {peer[0]}: {e}", "ERROR")
 
     def _host_send(self):
         while self.is_hosting:
@@ -599,14 +707,18 @@ class VoiceLink:
                     for peer in list(self.peers.keys()):
                         try: self.server_sock.sendto(pkt, peer)
                         except Exception as e:
-                            log.error(f"Host send hatası -> {peer}: {e}")
+                            self._ui_log(f"Host send hatası -> {peer[0]}: {e}", "ERROR")
                 else:
                     time.sleep(0.015)
             except OSError as e:
-                log.error(f"Host send OSError: {e}")
+                self._ui_log(f"Host send OSError: {e}", "ERROR")
                 break
             except Exception as e:
-                log.error(f"Host send beklenmeyen hata: {e}")
+                self._ui_log(f"Host send beklenmeyen hata: {e}", "ERROR")
+
+    # ──────────────────────────────────────────────────────
+    #  Client ağ döngüleri
+    # ──────────────────────────────────────────────────────
 
     def _client_recv(self):
         while self.is_connected:
@@ -615,7 +727,7 @@ class VoiceLink:
             except socket.timeout:
                 continue
             except OSError as e:
-                log.error(f"Client recv OSError: {e}")
+                self._ui_log(f"Client recv OSError: {e}", "ERROR")
                 break
 
             if not data:
@@ -626,7 +738,7 @@ class VoiceLink:
                     msg = json.loads(data[1:].decode())
                     t = msg.get('type')
                     if t == 'ack':
-                        log.info(f"ACK alındı, host nick={msg['nick']}")
+                        self._ui_log(f"ACK alındı — host: {msg['nick']}")
                         self.peer_names[HOST_ADDR] = msg['nick']
                         if HOST_ADDR not in self.peer_volumes:
                             self.peer_volumes[HOST_ADDR] = 1.0
@@ -635,21 +747,23 @@ class VoiceLink:
                             self.peer_names[pa] = p['nick']
                             if pa not in self.peer_volumes:
                                 self.peer_volumes[pa] = 1.0
+                            self._ui_log(f"Mevcut kullanıcı: {p['nick']} ({p['ip']})")
+                        self._ui_log("Bağlantı kuruldu, ses akışı başladı")
                         self.root.after(0, self._refresh_users)
                     elif t == 'peer_join':
-                        log.info(f"Peer katıldı: {msg['ip']}, nick={msg['nick']}")
+                        self._ui_log(f"Odaya katıldı: {msg['nick']} ({msg['ip']})")
                         pa = (msg['ip'], msg['port'])
                         self.peer_names[pa] = msg['nick']
                         if pa not in self.peer_volumes:
                             self.peer_volumes[pa] = 1.0
                         self.root.after(0, self._refresh_users)
                     elif t == 'peer_leave':
-                        log.info(f"Peer ayrıldı: {msg['ip']}")
                         pa = (msg['ip'], msg['port'])
-                        self.peer_names.pop(pa, None)
+                        nick = self.peer_names.pop(pa, msg['ip'])
+                        self._ui_log(f"Ayrıldı: {nick} ({msg['ip']})")
                         self.root.after(0, self._refresh_users)
                 except Exception as e:
-                    log.error(f"Client ctrl parse hatası: {e}")
+                    self._ui_log(f"Client ctrl parse hatası: {e}", "ERROR")
 
             elif data[:1] == AUDIO_HDR:
                 if len(data) > 7:
@@ -670,16 +784,20 @@ class VoiceLink:
                 else:
                     time.sleep(0.015)
             except OSError as e:
-                log.error(f"Client send OSError: {e}")
+                self._ui_log(f"Client send OSError: {e}", "ERROR")
                 break
             except Exception as e:
-                log.error(f"Client send beklenmeyen hata: {e}")
+                self._ui_log(f"Client send hatası: {e}", "ERROR")
+
+    # ──────────────────────────────────────────────────────
+    #  UI yardımcıları
+    # ──────────────────────────────────────────────────────
 
     def _toggle_mic(self):
         self.mic_muted = not self.mic_muted
         if self.btn_mic.cget('state') == 'disabled':
             return
-        log.info(f"Mikrofon: {'kapalı' if self.mic_muted else 'açık'}")
+        self._ui_log(f"Mikrofon: {'kapalı' if self.mic_muted else 'açık'}")
         self.btn_mic.config(bg='#dc2626' if self.mic_muted else '#16a34a')
         self._update_mic_text()
 
@@ -695,7 +813,7 @@ class VoiceLink:
         try:
             sock.sendto(CTRL_HDR + json.dumps(msg, ensure_ascii=False).encode(), addr)
         except Exception as e:
-            log.error(f"Ctrl gönderme hatası -> {addr}: {e}")
+            self._ui_log(f"Ctrl gönderme hatası -> {addr}: {e}", "ERROR")
 
     def _local_ip(self):
         try:
@@ -717,7 +835,6 @@ class VoiceLink:
         new_val = max(0, min(200, var.get() + delta))
         var.set(new_val)
         self.peer_volumes[addr] = new_val / 100.0
-        log.debug(f"Volume değişti: {addr} -> {new_val}%")
 
     def _refresh_users(self):
         for w in self.frm_users.winfo_children():
@@ -761,7 +878,7 @@ class VoiceLink:
         self.root.mainloop()
 
     def _on_close(self):
-        log.info("Uygulama kapatıldı")
+        self._ui_log("Uygulama kapatılıyor...")
         self.running      = False
         self.is_hosting   = False
         self.is_connected = False
